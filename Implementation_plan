@@ -1,0 +1,124 @@
+Here is the functional spec for the build. It uses standard structural components to keep us organized, but the focus is strictly on shipping the working logic.
+
+### Project Spec: Spotify Local Cache Salvage (SLCS)
+
+#### 1. System Overview
+**Objective:** A lightweight, offline Python pipeline to extract trapped "local files" from a static Spotify data export, match them against YouTube, download the highest quality audio, and reconstruct the ID3 metadata so the files are ready for transfer.
+**Core Philosophy:** Modularity. We decouple the extraction, downloading, and tagging phases. We rely on local file I/O between phases so a network failure at step 2 doesn't force you to rerun step 1.
+
+#### 2. Architecture & Toolchain
+We are building a 3-stage sequential pipeline.
+* **Runtime:** Python 3.10+
+* **Phase 1 (Extractor):** Python's built-in `json` library.
+* **Phase 2 (Fetcher):** `yt-dlp` (handles extraction and interfaces with `ffmpeg` for audio conversion).
+* **Phase 3 (Tagger):** `mutagen` (specifically the `mutagen.id3` module) for injecting metadata directly into the audio headers.
+
+#### 3. Data Flow
+**Input:** `Playlist.json` (Raw Spotify Account Export).
+**Output:** A target directory of fully tagged `.mp3` files.
+
+* **Step 1: Parse & Flatten**
+    * Read the target JSON.
+    * Iterate through playlist arrays, filtering strictly for objects where the local file flag is `true`.
+    * Extract `artistName` and `trackName`.
+    * Store the results in a flat intermediate format (e.g., `missing_tracks.txt`).
+
+* **Step 2: The Download Engine**
+    * Read the intermediate text file line by line.
+    * Construct the query string for `yt-dlp`: `ytsearch1:"{artist} - {track}"`.
+    * Invoke `yt-dlp` using Python's subprocess or its native Python wrapper.
+    * Force extract audio to `.mp3` using `ffmpeg` under the hood. Output the file as `"{artist} - {track}.mp3"`.
+
+* **Step 3: Metadata Reconstruction**
+    * Immediately upon a successful download, pass the local file path to the tagging function.
+    * Use `mutagen` to write standard ID3 tags: `TIT2` (Title) and `TPE1` (Artist).
+
+#### 4. Edge Cases & Error Handling
+Taking a cue from CSVMusic, automated matching isn't bulletproof.
+* **Mismatches / Live Versions:** `ytsearch1` grabs the absolute top result. Sometimes that's a 10-minute live recording or a music video with a long dialogue intro.
+    * *Mitigation:* In version 1, we pull the duration metadata from `yt-dlp` before downloading. If the track is unusually long (e.g., > 7 minutes), we flag it in an `anomalies.log` file so you can review it manually.
+* **Rate Limiting:** Smashing YouTube with 500 parallel requests will get your IP temporarily blocked.
+    * *Mitigation:* Implement a standard `time.sleep()` delay (e.g., 2-4 seconds) between batch fetches to keep the network behavior looking normal.
+
+#### 5. Implementation Milestones
+* **Milestone 1:** The JSON parser. Successfully read your Spotify export and write a clean text file of just 10 tracks to prove the target logic.
+* **Milestone 2:** The fetcher integration. Hardcode one track string and successfully pull an `.mp3` to the local disk using `yt-dlp`.
+* **Milestone 3:** The tagger. Write a standalone function that targets a raw `.mp3` and successfully modifies its Title and Artist properties.
+* **Milestone 4:** The main loop. Wire the components together so the text file feeds the downloader, which then feeds the tagger.
+
+This keeps the build tight and predictable. Once the core CLI loop is solid, we can easily add the UI elements or manual fallback pickers if you decide to scale it up.
+
+To build this out cleanly, we need to set up a repository that separates the logic into distinct, modular chunks. If everything lives in one massive script, debugging a failed download or a broken ID3 tag will become a nightmare. 
+
+By isolating the extraction, downloading, and tagging, you create a pipeline where you can test each component individually before wiring them all together.
+
+Here is the architectural blueprint and repository structure for the project.
+
+### **1. The Tech Stack & Toolchain**
+We are keeping the stack completely local and as lean as possible.
+* **Core Language:** Python 3.10+
+* **System Dependency:** `ffmpeg` (This must be installed on your OS and added to your system PATH. `yt-dlp` relies on it to convert the raw video/audio streams into clean `.mp3` files).
+* **Python Packages (via `pip`):**
+  * `yt-dlp`: The engine for querying YouTube and pulling the audio. We will use its native Python API rather than calling it via the command line.
+  * `mutagen`: The library for safely injecting standard ID3 metadata into the final `.mp3` files.
+
+### **2. Repository Structure**
+Here is how your project folder should look. This is a standard, professional Python project layout.
+
+```text
+spotify-local-salvage/
+│
+├── data/                     # Git-ignored: Keep your personal data out of version control
+│   ├── Playlist.json         # Your raw Spotify export
+│   └── missing_tracks.txt    # The intermediate list generated by the extractor
+│
+├── output/                   # Git-ignored: Where the final .mp3 files will land
+│
+├── src/                      # The actual source code modules
+│   ├── __init__.py           # Empty file, tells Python this folder is a module
+│   ├── extractor.py          # Phase 1 logic: Parses JSON -> Text File
+│   ├── fetcher.py            # Phase 2 logic: Interacts with yt-dlp
+│   └── tagger.py             # Phase 3 logic: Interacts with mutagen
+│
+├── .gitignore                # Tells Git to ignore /data, /output, and environment files
+├── requirements.md           # Lists the pip packages needed to run the project
+├── readme.md                 # Gives the overview of the project/repo  
+└── main.py                   # The orchestrator. Ties the src modules together.
+```
+
+### **3. Module Responsibilities**
+
+Every file in the `src/` directory has exactly one job. 
+
+#### **`src/extractor.py`**
+* **Input:** Path to `data/Playlist.json`.
+* **Action:** Scans the JSON for `is_local == true`, grabs the artist and track name, formats them as "Artist - Track Name".
+* **Output:** Writes the formatted strings to `data/missing_tracks.txt`. 
+* *Why this matters:* Creating an intermediate text file gives you a hard checkpoint. If the script crashes later, you don't have to parse the JSON again.
+
+#### **`src/fetcher.py`**
+* **Input:** A single target string (e.g., "Daft Punk - Horizon") and a destination path (`output/`).
+* **Action:** Configures `yt-dlp` to search YouTube (`ytsearch1:`), select the best audio stream, use `ffmpeg` to extract it to `.mp3`, and save it to the output folder.
+* **Output:** Returns the exact file path of the newly downloaded `.mp3` (or an error if it failed).
+
+#### **`src/tagger.py`**
+* **Input:** The file path of the downloaded `.mp3`, the artist name, and the track name.
+* **Action:** Opens the audio file using `mutagen`, writes the `TIT2` (Title) and `TPE1` (Artist) ID3 tags, and saves the file.
+* **Output:** A boolean success/failure confirmation.
+
+#### **`main.py` (The Orchestrator)**
+This is the command center. It doesn't actually *do* any of the heavy lifting; it just directs traffic. 
+1. It calls `extractor.py` to ensure `missing_tracks.txt` exists.
+2. It opens `missing_tracks.txt` and loops through it line by line.
+3. For each line, it splits the string back into Artist and Track, passes the string to `fetcher.py`, gets the downloaded file path, and immediately hands that path to `tagger.py`.
+4. It logs what succeeded and what failed.
+
+### **4. Implementation Roadmap**
+
+To actually build this without getting overwhelmed, stick to this sequence:
+
+1. **Setup:** Create the folders, install Python, install `ffmpeg`, and create your `.gitignore` so you don't accidentally upload your personal Spotify data to GitHub later.
+2. **Build the Extractor:** Write `extractor.py` first. Run it, look at the text file it generates. If it's a clean list of songs, you've conquered Phase 1.
+3. **Build the Fetcher:** Hardcode a single song string into `fetcher.py`. Run it. If an `.mp3` appears in your `output/` folder and plays perfectly, Phase 2 is done.
+4. **Build the Tagger:** Pass that downloaded `.mp3` to `tagger.py`. Run it, then open the file in a media player. If the Title and Artist show up correctly, Phase 3 is done.
+5. **Wire it up:** Write `main.py` to loop everything together.
