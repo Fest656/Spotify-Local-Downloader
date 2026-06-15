@@ -1,10 +1,10 @@
-# 🎵 SLCS: Spotify Local Cache Salvage
+# SLCS: Spotify Local Cache Salvage
 
 A simple Python CLI pipeline designed to extract, filter, and salvage tracks from Spotify account data exports. SLCS specializes in recovering "local files" and standard playlist tracks by fetching high-quality audio from YouTube.
    
 ---
 
-## 🚀 Key Features
+## Key Features
 
 - **Automated Extraction**: Deep-parses Spotify's `Playlist.json` to recover metadata even from obfuscated local file URIs.
 - **Intelligent Filtering**: Choose between *Local Files Only*, *Remote Tracks Only*, or *Both*. Select specific playlists to process.
@@ -15,16 +15,16 @@ A simple Python CLI pipeline designed to extract, filter, and salvage tracks fro
 
 ---
 
-## 🛠️ Technical Stack
+## Technical Stack
 
-- **Language**: Python 3.x
+- **Language**: Python 3.15
 - **Extraction**: `json`, `urllib.parse`
 - **Download Engine**: [yt-dlp](https://github.com/yt-dlp/yt-dlp)
 - **Audio Processing**: [FFmpeg](https://ffmpeg.org/) (Required for MP3 conversion)
 
 ---
 
-## 📦 Prerequisites
+## Prerequisites
 
 Before running the pipeline, ensure you have the following installed:
 
@@ -52,21 +52,6 @@ Before running the pipeline, ensure you have the following installed:
 
 ---
 
-## 📁 Project Structure
-
-```text
-Spotify-Local-Downloader/
-├── data/               # Input JSON and generated download queues
-├── src/                # Core pipeline logic
-│   ├── main.py         # Entry point & orchestrator
-│   ├── extractor.py    # Data parsing logic
-│   ├── filter.py       # Queue preparation & deduplication
-│   └── fetcher.py      # YouTube search & download engine
-├── output/             # Downloaded MP3s (organized by playlist)
-└── README.md           # You are here!
-```
-
----
 
 ## ⚖️ Disclaimer
 
